@@ -103,7 +103,7 @@ async def file_upload_callback_handler(event):
     chat_id = event.chat_id
     progress_upload_message = await client.send_message(event.chat_id, f"Loading files...")
     
-    for file_path in files:
+    for file_path in sorted(files):
         file_size = os.path.getsize(file_path)
         if file_size > 1.9 * 1024 * 1024 * 1024:  # If file is larger than 1.9GB
             await client.edit_message(event.chat_id, progress_upload_message, f"Splitting {file_path}")
@@ -111,7 +111,7 @@ async def file_upload_callback_handler(event):
             split_files = [f for f in os.listdir(folder_path) if f.startswith(os.path.basename(file_path)) and seven_zip_pattern.search(f)]
             num_files = num_files + len(split_files) - 1
             await client.edit_message(event.chat_id, message, f"Sending{delete_message} {num_files} files from {folder_name}")
-            for split_file_path in split_files:
+            for split_file_path in sorted(split_files):
                 current_file = split_file_path
                 await client.edit_message(event.chat_id, progress_upload_message, f"Sending {current_file}")
                 await client.send_file(event.chat_id, os.path.join(folder_path, split_file_path), force_document=True, progress_callback=upload_progress)
