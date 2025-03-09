@@ -1,0 +1,22 @@
+services:
+
+  Telegram_file_uploader:
+    # build: .
+    image: j0n4n/telegram_file_uploader:latest
+    container_name: Telegram_file_uploader
+    environment:
+      TG_API_ID: 
+      TG_API_HASH: 
+      TG_BOT_TOKEN: 
+      TG_AUTHORIZED_USERS_ID: 
+      # TG_SESSION: # OPTIONAL
+      # BOT_UPLOAD_DIR: # OPTIONAL
+      # BOT_UPDATE_UPLOAD_INTERVAL: # OPTIONAL
+      # SEND_PUBLIC_IP: # OPTIONAL
+    volumes:
+      - ./sendFiles:/sendFiles
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: "2g"
