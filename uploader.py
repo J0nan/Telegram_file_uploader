@@ -127,7 +127,7 @@ async def file_upload_callback_handler(event):
                 delete_file(file_path)
     if delete_after_sending:
         delete_folder(folder_path)
-    await progress_upload_message.delete()
+    await client.edit_message(event.chat_id, progress_upload_message, f"All files sent.")
     print("All files sent.")
     await client.send_message(event.chat_id, "All files sent.")
 
