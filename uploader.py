@@ -4,7 +4,10 @@ import subprocess
 import re
 import requests
 from configs.bot_config import *
+from utils.lang_map import lang_map_code
 import asyncio
+import json
+import flagz
 
 seven_zip_pattern = re.compile(r"\.7z\..*$")
 
@@ -105,6 +108,8 @@ async def file_upload_callback_handler(event):
     
     for file_path in sorted(files):
         file_size = os.path.getsize(file_path)
+        if SEND_VIDEO_INFO.upper() == "TRUE":
+            await client.send_message(chat_id, f"{file_path}\n{get_video_info(file_path)}")
         if file_size > 1.9 * 1024 * 1024 * 1024:  # If file is larger than 1.9GB
             await client.edit_message(event.chat_id, progress_upload_message, f"Splitting {file_path}")
             split_file(file_path)
@@ -134,7 +139,7 @@ async def file_upload_callback_handler(event):
 def split_file(file_path):
     output_dir = os.path.dirname(file_path)
     file_name = os.path.basename(file_path)
-    split_command = f'7z a -v1900M "{file_name}.7z" "{file_name}"'
+    split_command = f'7z a -aoa -v1900M "{file_name}.7z" "{file_name}"'
     subprocess.call(split_command, shell=True, cwd=output_dir)
 
 def delete_file(file_path):
@@ -158,6 +163,81 @@ async def upload_progress(current, total):
     if current_time - last_update_time >= UPDATE_UPLOAD_INTERVAL:
         last_update_time = current_time
         await client.edit_message(chat_id, progress_upload_message, f"Sending {current_file}\nProgress: {current/total:.2%}")
+
+def get_video_info(file_path):
+    # Run ffprobe to get stream info in JSON
+    result = subprocess.run(
+        ['ffprobe', '-v', 'error', '-show_entries', 'stream', '-of', 'json', file_path],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
+    )
+    probe_data = json.loads(result.stdout)
+
+    video_stream = next((s for s in probe_data['streams'] if s['codec_type'] == 'video'), None)
+    audio_streams = [s for s in probe_data['streams'] if s['codec_type'] == 'audio']
+    subtitle_streams = [s for s in probe_data['streams'] if s['codec_type'] == 'subtitle']
+
+    # Codec mapping to common names
+    codec_map = {
+        'h264': 'x264',
+        'hevc': 'x265',
+        'vp9': 'VP9',
+        'av1': 'AV1',
+        'mpeg4': 'MPEG-4',
+        'vp8': 'VP8',
+    }
+
+    # Get resolution and codec
+    if video_stream:
+        width = video_stream.get('width', '?')
+        height = video_stream.get('height', '?')
+        codec_raw = video_stream.get('codec_name', 'unknown')
+        codec = codec_map.get(codec_raw.lower(), codec_raw.upper())
+        resolution = f"{width} x {height} ({codec})"
+    else:
+        resolution = "No video stream"
+
+    def lang_to_emoji(lang_code, title=''):
+        if not lang_code:
+            return ''
+        lang_code = lang_code.lower()
+        title = (title or '').lower()
+        # Special handling for Spanish
+        if lang_code.startswith('spa') or lang_code.startswith('es'):
+            if 'latin' in title:
+                return flagz.by_code(lang_map_code.get('es-MX'))
+            elif 'european' in title:
+                return flagz.by_code(lang_map_code.get('es'))
+            else:
+                return flagz.by_code(lang_map_code.get('es'))
+        country = lang_map_code.get(lang_code[:3], None)
+        if country:
+            return flagz.by_code(country)
+        elif title:
+            return title.capitalize()
+        else:
+            return f"🏳️({lang_code[:3]})"
+
+    def unique_flags(streams):
+        seen = set()
+        flags = []
+        for s in streams:
+            lang = s.get('tags', {}).get('language', '')
+            title = s.get('tags', {}).get('title', '')
+            emoji = lang_to_emoji(lang, title)
+            if emoji and emoji not in seen:
+                seen.add(emoji)
+                flags.append(emoji)
+        return '+'.join(flags)
+
+    audio_langs = unique_flags(audio_streams)
+    subtitle_langs = unique_flags(subtitle_streams)
+
+    if LANGUAGE_VIDEO_INFO.upper() == "ES":
+        return f"Calidad: {resolution} \nAudio: {audio_langs or 'Ninguno'}\nSubtítulos: {subtitle_langs or 'Ninguno' }"
+    else:
+        return f"Quality: {resolution} \nAudio: {audio_langs or 'None'}\nSubtitles: {subtitle_langs or 'None'}"
 
 with client:
     client.loop.run_until_complete(notify_users())

@@ -26,6 +26,8 @@ Create a docker-compose.yml file with the content of the one [on this repo](./do
 - `BOT_UPLOAD_DIR` (Optional - default: `/sendFiles`): The file path inside the container where the bot will look for folders to send files.
 - `BOT_UPDATE_UPLOAD_INTERVAL` (Optional - default: `10`): The number of seconds the bot updates the message with the progress of each file is sent. NOTE: the lower the number the higher probability of the upload to fail due to many requests sent to Telegram.
 - `SEND_PUBLIC_IP` (Optional - default: `False`): If this is True, the bot will send on the message its sends when it comes online the public IP it has.
+- `SEND_VIDEO_INFO` (Optional - default: `False`): If this is True, the bot will send a message before each file the Quality and Code (eg: 1920 x 1080 (x264)). Also the Audio and Subtitle languages of the tracks as emojis.
+- `LANGUAGE_VIDEO_INFO` (Optional - default: `EN`): It can be EN or ES and changes the language of the message that sends the video information.
 
 After setting the environment values, change the volumes to correspond to the path you want the bot to access. The part on the left of the `:` is where the files are located on your machine. On the right is where the files will be inside the container, this must correspond to the path setted on `BOT_UPLOAD_DIR`. For example:
 
