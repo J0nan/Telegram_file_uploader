@@ -1,6 +1,10 @@
 FROM python:3.12
 
-RUN apt-get -y update
+# Install dependencies
+RUN apt-get update && \
+    apt-get install -y ffmpeg p7zip-full && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
@@ -9,12 +13,10 @@ WORKDIR /app
 COPY requirements.txt .
 COPY uploader.py .
 COPY configs/* ./configs/
+COPY utils/* ./utils/
 
-# Install dependencies
+# Install python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Install 7zip
-RUN apt-get update && apt-get install -y p7zip-full && rm -rf /var/lib/apt/lists/*
 
 VOLUME [ "/sendFiles"]
 

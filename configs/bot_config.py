@@ -12,3 +12,7 @@ AUTHORIZED_USERS_ID = os.environ.get("TG_AUTHORIZED_USERS_ID", False)
 UPDATE_UPLOAD_INTERVAL = float(os.environ.get("BOT_UPDATE_UPLOAD_INTERVAL", 10))
 
 SEND_PUBLIC_IP = str(os.environ.get("SEND_PUBLIC_IP", False))
+
+SEND_VIDEO_INFO = str(os.environ.get("SEND_VIDEO_INFO", False))
+
+LANGUAGE_VIDEO_INFO = str(os.environ.get("LANGUAGE_VIDEO_INFO", "EN"))

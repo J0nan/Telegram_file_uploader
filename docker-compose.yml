@@ -13,6 +13,8 @@ services:
       # BOT_UPLOAD_DIR: # OPTIONAL
       # BOT_UPDATE_UPLOAD_INTERVAL: # OPTIONAL
       # SEND_PUBLIC_IP: # OPTIONAL
+      # SEND_VIDEO_INFO: # OPTIONAL
+      # LANGUAGE_VIDEO_INFO: # OPTIONAL
     volumes:
       - ./sendFiles:/sendFiles
     deploy:
