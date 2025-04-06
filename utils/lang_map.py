@@ -71,6 +71,10 @@ lang_map_code = {
     'nor': 'NO',
     'no': 'NO',
 
+    # Norwegian Bokmål
+    'nob': 'NO',
+    'nb': 'NO',
+
     # Danish
     'dan': 'DK',
     'da': 'DK',
@@ -117,4 +121,12 @@ lang_map_code = {
     # Vietnamese
     'vie': 'VN',
     'vi': 'VN',
+
+    # Croatian
+    'hrv': 'HR',
+    'hr': 'HR',
+
+    # Indonesian
+    'ind': 'ID',
+    'id': 'ID',
 }
