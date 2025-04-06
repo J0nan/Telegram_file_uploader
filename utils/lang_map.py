@@ -129,4 +129,9 @@ lang_map_code = {
     # Indonesian
     'ind': 'ID',
     'id': 'ID',
+
+    # Malay
+    'msa': 'MY',
+    'zsm': 'MY',
+    'ms': 'MY',
 }
