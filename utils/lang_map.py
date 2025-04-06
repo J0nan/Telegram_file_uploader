@@ -130,8 +130,9 @@ lang_map_code = {
     'ind': 'ID',
     'id': 'ID',
 
-    # Malay
+    # Malaysia
     'msa': 'MY',
     'zsm': 'MY',
     'ms': 'MY',
+    'may': 'MY',
 }
