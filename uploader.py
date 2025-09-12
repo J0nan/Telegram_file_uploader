@@ -215,7 +215,8 @@ def get_video_info(file_path):
         if country:
             return flagz.by_code(country)
         elif title:
-            return title.capitalize()
+            return f"{title.capitalize()}({lang_code[:3]})"
+            # return title.capitalize()
         else:
             return f"🏳️({lang_code[:3]})"
 
