@@ -59,20 +59,43 @@ async def activate_deletion_callback_handler(event):
         return
     
     data = event.data.decode('utf-8')
-    null, folder_name = data.split(":")
+    null, folder_name = data.split(":", 1)
     folder_path = os.path.join(SEND_FILES_DIR, folder_name)
     
     if not os.path.exists(folder_path):
         await event.answer("Folder not found.", alert=True)
         return
     
+    if TMDB_API_KEY:
+        is_es = LANGUAGE_VIDEO_INFO.upper() == "ES"
+        buttons = [
+            Button.inline("Películas" if is_es else "Movies", data=f"/t:m:{folder_name}"),
+            Button.inline("Series" if is_es else "TV Shows", data=f"/t:t:{folder_name}"),
+            Button.inline("Ninguno" if is_es else "None", data=f"/t:n:{folder_name}")
+        ]
+        msg = "¿Qué tipo de contenido hay en esta carpeta?" if is_es else "What type of content is in this folder?"
+        await client.send_message(event.chat_id, msg, buttons=buttons)
+    else:
+        buttons = [
+            Button.inline("Yes", data=f"/do:d:n:{folder_name}"),
+            Button.inline("No", data=f"/do:k:n:{folder_name}")
+        ]
+        await client.send_message(event.chat_id, f"Do you want to delete the files in {folder_name} after sending?", buttons=buttons)
+
+@client.on(events.CallbackQuery(pattern=r'^\/t:'))
+async def media_type_callback_handler(event):
+    await event.delete()
+    if str(event.chat_id) not in ALLOWED_USERS:
+        return
+    data = event.data.decode('utf-8')
+    _, media_type, folder_name = data.split(":", 2)
     buttons = [
-        Button.inline("Yes", data=f"/delete:{folder_name}"),
-        Button.inline("No", data=f"/keep:{folder_name}")
+        Button.inline("Yes", data=f"/do:d:{media_type}:{folder_name}"),
+        Button.inline("No", data=f"/do:k:{media_type}:{folder_name}")
     ]
     await client.send_message(event.chat_id, f"Do you want to delete the files in {folder_name} after sending?", buttons=buttons)
 
-@client.on(events.CallbackQuery(pattern=r'^\/(delete|keep):'))
+@client.on(events.CallbackQuery(pattern=r'^\/do:'))
 async def file_upload_callback_handler(event):
     if str(event.chat_id) not in ALLOWED_USERS:
         await event.answer("You are not authorized to use this bot.", alert=True)
@@ -81,10 +104,10 @@ async def file_upload_callback_handler(event):
         return
 
     data = event.data.decode('utf-8')
-    action, folder_name = data.split(":")
+    _, action, media_type, folder_name = data.split(":", 3)
     delete_after_sending = False
     delete_message = ""
-    if action == "/delete":
+    if action == "d":
         delete_after_sending = True
         delete_message = " and deleting"
 
@@ -106,35 +129,136 @@ async def file_upload_callback_handler(event):
     chat_id = event.chat_id
     progress_upload_message = await client.send_message(event.chat_id, f"Loading files...")
     
-    for file_path in sorted(files):
-        file_size = os.path.getsize(file_path)
-        if SEND_VIDEO_INFO.upper() == "TRUE":
-            await client.send_message(chat_id, f"{file_path}\n{get_video_info(file_path)}")
-        if file_size > 1.9 * 1024 * 1024 * 1024:  # If file is larger than 1.9GB
-            await client.edit_message(event.chat_id, progress_upload_message, f"Splitting {file_path}")
-            split_file(file_path)
-            split_files = [f for f in os.listdir(folder_path) if f.startswith(os.path.basename(file_path)) and seven_zip_pattern.search(f)]
-            num_files = num_files + len(split_files) - 1
-            await client.edit_message(event.chat_id, message, f"Sending{delete_message} {num_files} files from {folder_name}")
-            for split_file_path in sorted(split_files):
-                current_file = split_file_path
-                await client.edit_message(event.chat_id, progress_upload_message, f"Sending {current_file}")
-                await client.send_file(event.chat_id, os.path.join(folder_path, split_file_path), force_document=True, progress_callback=upload_progress)
-                if delete_after_sending:
-                    delete_file(os.path.join(folder_path, split_file_path))  # Delete the split file
-            if delete_after_sending:
-                delete_file(file_path)  # Delete the original file before splitting
-        else:
-            current_file = file_path
-            await client.edit_message(event.chat_id, progress_upload_message, f"Sending {current_file}")
-            await client.send_file(event.chat_id, file_path, force_document=True, progress_callback=upload_progress)
-            if delete_after_sending:
-                delete_file(file_path)
-    if delete_after_sending:
+    failed_media = []
+
+    # TMDB LOGIC
+    if media_type == 'm': # Movies
+        for file_path in sorted(files):
+            file_name_no_ext = os.path.splitext(os.path.basename(file_path))[0]
+            match = re.match(r'^(.*?)\s*(?:\((\d{4})\))?$', file_name_no_ext)
+            if match:
+                title, year = match.group(1), match.group(2)
+                tmdb_res = search_tmdb_movie(title, year)
+                if tmdb_res:
+                    poster_url = f"https://image.tmdb.org/t/p/w500{tmdb_res.get('poster_path')}" if tmdb_res.get('poster_path') else None
+                    overview = tmdb_res.get('overview', '')
+                    vid_info = get_video_info(file_path) if SEND_VIDEO_INFO.upper() == "TRUE" else ""
+                    
+                    release_year = tmdb_res.get('release_date', '')[:4]
+                    msg_text = f"{tmdb_res.get('title')} ({release_year})\n\n{overview}\n\n{vid_info}"
+                    if poster_url:
+                        await client.send_file(chat_id, poster_url, caption=msg_text)
+                    else:
+                        await client.send_message(chat_id, msg_text)
+                else:
+                    failed_media.append(f"Movie: {file_name_no_ext} (Not found in TMDB)")
+                    continue # Skip sending this file
+            else:
+                failed_media.append(f"Movie: {file_name_no_ext} (Could not parse name/year)")
+                continue
+
+            await send_file_with_split(file_path, folder_path, delete_after_sending, message, folder_name)
+
+    elif media_type == 't': # TV Shows
+        series_groups = {}
+        for file_path in files:
+            file_name_no_ext = os.path.splitext(os.path.basename(file_path))[0]
+            # Format: nombre - S01E01
+            match = re.search(r'^(.*?)\s*-\s*[sS](\d+)[eE](\d+)', file_name_no_ext)
+            if match:
+                series_name = match.group(1).strip()
+                # Clean year from series name if present (e.g. "The Rookie (2018)" -> "The Rookie")
+                clean_name = re.sub(r'\s*\(\d{4}\)$', '', series_name).strip()
+                season_num = int(match.group(2))
+                
+                if series_name not in series_groups:
+                    series_groups[series_name] = {'clean_name': clean_name, 'seasons': {}}
+                
+                if season_num not in series_groups[series_name]['seasons']:
+                    series_groups[series_name]['seasons'][season_num] = []
+                
+                series_groups[series_name]['seasons'][season_num].append(file_path)
+            else:
+                failed_media.append(f"File: {file_name_no_ext} (Doesn't match 'nombre - S01E01' format)")
+                
+        for series_name, series_data in series_groups.items():
+            tmdb_series = search_tmdb_tv(series_data['clean_name'])
+            if not tmdb_series:
+                failed_media.append(f"Series: {series_name} (Not found in TMDB)")
+                continue
+
+            poster_url = f"https://image.tmdb.org/t/p/w500{tmdb_series.get('poster_path')}" if tmdb_series.get('poster_path') else None
+            overview = tmdb_series.get('overview', '')
+            release_year = tmdb_series.get('first_air_date', '')[:4]
+            series_msg = f"{tmdb_series.get('name')} ({release_year})\n\n{overview}"
+            
+            if poster_url:
+                await client.send_file(chat_id, poster_url, caption=series_msg)
+            else:
+                await client.send_message(chat_id, series_msg)
+            
+            series_id = tmdb_series.get('id')
+            
+            # Sort seasons
+            for season_num in sorted(series_data['seasons'].keys()):
+                season_files = sorted(series_data['seasons'][season_num])
+                season_data = get_tmdb_tv_season(series_id, season_num)
+                season_poster = f"https://image.tmdb.org/t/p/w500{season_data.get('poster_path')}" if season_data and season_data.get('poster_path') else None
+                
+                vid_info = get_video_info(season_files[0]) if SEND_VIDEO_INFO.upper() == "TRUE" else ""
+                
+                is_es = LANGUAGE_VIDEO_INFO.upper() == "ES"
+                season_text = f"Temporada {season_num}\n{len(season_files)} episodios" if is_es else f"Season {season_num}\n{len(season_files)} episodes"
+                season_msg = f"{season_text}\n\n{vid_info}"
+                
+                if season_poster:
+                    await client.send_file(chat_id, season_poster, caption=season_msg)
+                else:
+                    await client.send_message(chat_id, season_msg)
+                
+                for file_path in season_files:
+                    await send_file_with_split(file_path, folder_path, delete_after_sending, message, folder_name)
+
+    else: # None / Default
+        for file_path in sorted(files):
+            if SEND_VIDEO_INFO.upper() == "TRUE":
+                await client.send_message(chat_id, f"{file_path}\n{get_video_info(file_path)}")
+            await send_file_with_split(file_path, folder_path, delete_after_sending, message, folder_name)
+
+    if delete_after_sending and not failed_media:
+        # Only delete folder if everything was sent successfully
         delete_folder(folder_path)
+        
     await client.edit_message(event.chat_id, progress_upload_message, f"All files sent.")
     print("All files sent.")
-    await client.send_message(event.chat_id, "All files sent.")
+    
+    if failed_media:
+        fail_msg = "The following media failed to upload due to TMDB lookup or parsing errors:\n" + "\n".join(failed_media)
+        await client.send_message(event.chat_id, fail_msg)
+    else:
+        await client.send_message(event.chat_id, "All files sent.")
+
+async def send_file_with_split(file_path, folder_path, delete_after_sending, message, folder_name):
+    global current_file
+    file_size = os.path.getsize(file_path)
+    if file_size > 1.9 * 1024 * 1024 * 1024:
+        await client.edit_message(chat_id, progress_upload_message, f"Splitting {file_path}")
+        split_file(file_path)
+        split_files = [f for f in os.listdir(folder_path) if f.startswith(os.path.basename(file_path)) and seven_zip_pattern.search(f)]
+        for split_file_path in sorted(split_files):
+            current_file = split_file_path
+            await client.edit_message(chat_id, progress_upload_message, f"Sending {current_file}")
+            await client.send_file(chat_id, os.path.join(folder_path, split_file_path), force_document=True, progress_callback=upload_progress)
+            if delete_after_sending:
+                delete_file(os.path.join(folder_path, split_file_path))
+        if delete_after_sending:
+            delete_file(file_path)
+    else:
+        current_file = file_path
+        await client.edit_message(chat_id, progress_upload_message, f"Sending {current_file}")
+        await client.send_file(chat_id, file_path, force_document=True, progress_callback=upload_progress)
+        if delete_after_sending:
+            delete_file(file_path)
 
 def split_file(file_path):
     output_dir = os.path.dirname(file_path)
@@ -239,6 +363,38 @@ def get_video_info(file_path):
         return f"Calidad: {resolution} \nAudio: {audio_langs or 'Ninguno'}\nSubtítulos: {subtitle_langs or 'Ninguno' }"
     else:
         return f"Quality: {resolution} \nAudio: {audio_langs or 'None'}\nSubtitles: {subtitle_langs or 'None'}"
+
+def tmdb_request(url, params):
+    try:
+        r = requests.get(url, params=params)
+        if r.status_code == 200:
+            return r.json()
+    except Exception as e:
+        print(f"TMDB request failed: {e}")
+    return None
+
+def search_tmdb_movie(name, year=None):
+    lang = "es-ES" if LANGUAGE_VIDEO_INFO.upper() == "ES" else "en-US"
+    params = {'api_key': TMDB_API_KEY, 'query': name, 'language': lang}
+    if year:
+        params['primary_release_year'] = year
+    res = tmdb_request("https://api.themoviedb.org/3/search/movie", params)
+    if res and res.get('results'):
+        return res['results'][0]
+    return None
+
+def search_tmdb_tv(name):
+    lang = "es-ES" if LANGUAGE_VIDEO_INFO.upper() == "ES" else "en-US"
+    params = {'api_key': TMDB_API_KEY, 'query': name, 'language': lang}
+    res = tmdb_request("https://api.themoviedb.org/3/search/tv", params)
+    if res and res.get('results'):
+        return res['results'][0]
+    return None
+
+def get_tmdb_tv_season(series_id, season_number):
+    lang = "es-ES" if LANGUAGE_VIDEO_INFO.upper() == "ES" else "en-US"
+    params = {'api_key': TMDB_API_KEY, 'language': lang}
+    return tmdb_request(f"https://api.themoviedb.org/3/tv/{series_id}/season/{season_number}", params)
 
 with client:
     client.loop.run_until_complete(notify_users())

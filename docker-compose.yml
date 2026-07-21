@@ -15,6 +15,7 @@ services:
       # SEND_PUBLIC_IP: # OPTIONAL
       # SEND_VIDEO_INFO: # OPTIONAL
       # LANGUAGE_VIDEO_INFO: # OPTIONAL
+      # TMDB_API_KEY: # OPTIONAL
     volumes:
       - ./sendFiles:/sendFiles
     deploy:

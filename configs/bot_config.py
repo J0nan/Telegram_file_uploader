@@ -16,3 +16,5 @@ SEND_PUBLIC_IP = str(os.environ.get("SEND_PUBLIC_IP", False))
 SEND_VIDEO_INFO = str(os.environ.get("SEND_VIDEO_INFO", False))
 
 LANGUAGE_VIDEO_INFO = str(os.environ.get("LANGUAGE_VIDEO_INFO", "EN"))
+
+TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")

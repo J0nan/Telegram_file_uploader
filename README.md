@@ -28,6 +28,7 @@ Create a docker-compose.yml file with the content of the one [on this repo](./do
 - `SEND_PUBLIC_IP` (Optional - default: `False`): If this is True, the bot will send on the message its sends when it comes online the public IP it has.
 - `SEND_VIDEO_INFO` (Optional - default: `False`): If this is True, the bot will send a message before each file the Quality and Code (eg: 1920 x 1080 (x264)). Also the Audio and Subtitle languages of the tracks as emojis.
 - `LANGUAGE_VIDEO_INFO` (Optional - default: `EN`): It can be EN or ES and changes the language of the message that sends the video information.
+- `TMDB_API_KEY` (Optional): The Movie Database API key. If provided, the bot will ask if the folder contains movies or TV shows and will automatically fetch and send posters, summaries, and metadata from TMDB before uploading the files.
 
 After setting the environment values, change the volumes to correspond to the path you want the bot to access. The part on the left of the `:` is where the files are located on your machine. On the right is where the files will be inside the container, this must correspond to the path setted on `BOT_UPLOAD_DIR`. For example:
 
