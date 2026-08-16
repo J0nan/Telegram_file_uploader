@@ -8,12 +8,45 @@ from utils.lang_map import lang_map_code
 import asyncio
 import json
 import flagz
+import traceback
+import functools
 
 seven_zip_pattern = re.compile(r"\.7z\..*$")
 
 client = TelegramClient(SESSION, API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
 ALLOWED_USERS = AUTHORIZED_USERS_ID.replace(" ", "").split(",")
+
+TELEGRAM_CAPTION_LIMIT = 1024
+
+async def send_traceback_to_user(chat_id, error=None):
+    tb_str = traceback.format_exc()
+    if not tb_str or "NoneType: None" in tb_str:
+        tb_str = str(error) if error else "Unknown error"
+
+    print(f"Error for user {chat_id}:\n{tb_str}")
+    if not chat_id:
+        return
+
+    error_msg = f"❌ Error:\n```\n{tb_str}\n```"
+    try:
+        if len(error_msg) > 4000:
+            for i in range(0, len(error_msg), 4000):
+                await client.send_message(chat_id, error_msg[i:i+4000])
+        else:
+            await client.send_message(chat_id, error_msg)
+    except Exception as send_err:
+        print(f"Failed to send traceback message to {chat_id}: {send_err}")
+
+def handle_errors(func):
+    @functools.wraps(func)
+    async def wrapper(event, *args, **kwargs):
+        try:
+            return await func(event, *args, **kwargs)
+        except Exception as e:
+            chat_id = getattr(event, 'chat_id', None)
+            await send_traceback_to_user(chat_id, e)
+    return wrapper
 
 async def notify_users():
     if SEND_PUBLIC_IP.upper() == "TRUE":
@@ -36,6 +69,7 @@ async def notify_users():
             print(f"Failed to send start message to {user_id}: {e}")
 
 @client.on(events.NewMessage(pattern='/showFolders'))
+@handle_errors
 async def show_folders_handler(event):
     if str(event.chat_id) not in ALLOWED_USERS:
         await event.reply("You are not authorized to use this bot.")
@@ -51,6 +85,7 @@ async def show_folders_handler(event):
     await event.reply("Select a folder:", buttons=buttons)
 
 @client.on(events.CallbackQuery(pattern=r'^\/folder:'))
+@handle_errors
 async def activate_deletion_callback_handler(event):
     await event.delete()
     if str(event.chat_id) not in ALLOWED_USERS:
@@ -83,6 +118,7 @@ async def activate_deletion_callback_handler(event):
         await client.send_message(event.chat_id, f"Do you want to delete the files in {folder_name} after sending?", buttons=buttons)
 
 @client.on(events.CallbackQuery(pattern=r'^\/t:'))
+@handle_errors
 async def media_type_callback_handler(event):
     await event.delete()
     if str(event.chat_id) not in ALLOWED_USERS:
@@ -95,7 +131,38 @@ async def media_type_callback_handler(event):
     ]
     await client.send_message(event.chat_id, f"Do you want to delete the files in {folder_name} after sending?", buttons=buttons)
 
+def format_caption(title_line, overview="", footer="", limit=TELEGRAM_CAPTION_LIMIT):
+    title_line = (title_line or "").strip()
+    overview = (overview or "").strip()
+    footer = (footer or "").strip()
+
+    prefix = f"{title_line}\n\n" if title_line else ""
+    suffix = f"\n\n{footer}" if footer else ""
+
+    if not overview:
+        full_text = f"{title_line}\n\n{footer}".strip() if (title_line and footer) else (title_line or footer)
+        if len(full_text) > limit:
+            return full_text[:limit - 3].rstrip() + "..."
+        return full_text
+
+    full_text = f"{prefix}{overview}{suffix}".strip()
+    if len(full_text) <= limit:
+        return full_text
+
+    overhead = len(prefix) + len(suffix) + 3  # 3 for "..."
+    available_for_overview = limit - overhead
+
+    if available_for_overview > 0:
+        trimmed_overview = overview[:available_for_overview].rstrip() + "..."
+        return f"{prefix}{trimmed_overview}{suffix}".strip()
+    else:
+        text = f"{prefix}{suffix}".strip()
+        if len(text) > limit:
+            return text[:limit - 3].rstrip() + "..."
+        return text
+
 @client.on(events.CallbackQuery(pattern=r'^\/do:'))
+@handle_errors
 async def file_upload_callback_handler(event):
     if str(event.chat_id) not in ALLOWED_USERS:
         await event.answer("You are not authorized to use this bot.", alert=True)
@@ -120,19 +187,17 @@ async def file_upload_callback_handler(event):
         return
     
     await event.delete()
-    num_files = len(files)
-    print(f"User {event.chat_id} is uploading{delete_message} {num_files} files from {folder_name}")
-    message = await client.send_message(event.chat_id, f"Sending{delete_message} {num_files} files from {folder_name}")
+    
     global progress_upload_message
     global current_file
     global chat_id
     chat_id = event.chat_id
-    progress_upload_message = await client.send_message(event.chat_id, f"Loading files...")
     
     failed_media = []
 
     # TMDB LOGIC
     if media_type == 'm': # Movies
+        valid_movies = []
         for file_path in sorted(files):
             file_name_no_ext = os.path.splitext(os.path.basename(file_path))[0]
             match = re.match(r'^(.*?)\s*(?:\((\d{4})\))?$', file_name_no_ext)
@@ -140,22 +205,33 @@ async def file_upload_callback_handler(event):
                 title, year = match.group(1), match.group(2)
                 tmdb_res = search_tmdb_movie(title, year)
                 if tmdb_res:
-                    poster_url = f"https://image.tmdb.org/t/p/w500{tmdb_res.get('poster_path')}" if tmdb_res.get('poster_path') else None
-                    overview = tmdb_res.get('overview', '')
-                    vid_info = get_video_info(file_path) if SEND_VIDEO_INFO.upper() == "TRUE" else ""
-                    
-                    release_year = tmdb_res.get('release_date', '')[:4]
-                    msg_text = f"{tmdb_res.get('title')} ({release_year})\n\n{overview}\n\n{vid_info}"
-                    if poster_url:
-                        await client.send_file(chat_id, poster_url, caption=msg_text)
-                    else:
-                        await client.send_message(chat_id, msg_text)
+                    valid_movies.append((file_path, tmdb_res))
                 else:
                     failed_media.append(f"Movie: {file_name_no_ext} (Not found in TMDB)")
-                    continue # Skip sending this file
             else:
                 failed_media.append(f"Movie: {file_name_no_ext} (Could not parse name/year)")
-                continue
+
+        num_files = len(valid_movies)
+        print(f"User {event.chat_id} is uploading{delete_message} {num_files} files from {folder_name}")
+        start_msg = f"Sending{delete_message} {num_files} files from {folder_name}"
+        if failed_media:
+            start_msg += "\n\nFiles not found on TheMovieDB:\n" + "\n".join(failed_media)
+        message = await client.send_message(event.chat_id, start_msg)
+        progress_upload_message = await client.send_message(event.chat_id, "Loading files...")
+
+        for file_path, tmdb_res in valid_movies:
+            poster_url = f"https://image.tmdb.org/t/p/w500{tmdb_res.get('poster_path')}" if tmdb_res.get('poster_path') else None
+            overview = tmdb_res.get('overview', '')
+            vid_info = get_video_info(file_path) if SEND_VIDEO_INFO.upper() == "TRUE" else ""
+            
+            release_year = tmdb_res.get('release_date', '')[:4]
+            title = tmdb_res.get('title', '')
+            title_line = f"{title} ({release_year})" if release_year else title
+            msg_text = format_caption(title_line, overview, vid_info)
+            if poster_url:
+                await client.send_file(chat_id, poster_url, caption=msg_text)
+            else:
+                await client.send_message(chat_id, msg_text)
 
             await send_file_with_split(file_path, folder_path, delete_after_sending, message, folder_name)
 
@@ -181,16 +257,37 @@ async def file_upload_callback_handler(event):
             else:
                 failed_media.append(f"File: {file_name_no_ext} (Doesn't match 'nombre - S01E01' format)")
                 
+        valid_series = {}
         for series_name, series_data in series_groups.items():
             tmdb_series = search_tmdb_tv(series_data['clean_name'])
             if not tmdb_series:
                 failed_media.append(f"Series: {series_name} (Not found in TMDB)")
                 continue
+            valid_series[series_name] = {
+                'tmdb_series': tmdb_series,
+                'seasons': series_data['seasons']
+            }
 
+        num_files = sum(
+            len(files_in_season)
+            for sdata in valid_series.values()
+            for files_in_season in sdata['seasons'].values()
+        )
+        print(f"User {event.chat_id} is uploading{delete_message} {num_files} files from {folder_name}")
+        start_msg = f"Sending{delete_message} {num_files} files from {folder_name}"
+        if failed_media:
+            start_msg += "\n\nFiles not found on TheMovieDB:\n" + "\n".join(failed_media)
+        message = await client.send_message(event.chat_id, start_msg)
+        progress_upload_message = await client.send_message(event.chat_id, "Loading files...")
+
+        for series_name, sdata in valid_series.items():
+            tmdb_series = sdata['tmdb_series']
             poster_url = f"https://image.tmdb.org/t/p/w500{tmdb_series.get('poster_path')}" if tmdb_series.get('poster_path') else None
             overview = tmdb_series.get('overview', '')
             release_year = tmdb_series.get('first_air_date', '')[:4]
-            series_msg = f"{tmdb_series.get('name')} ({release_year})\n\n{overview}"
+            name = tmdb_series.get('name', '')
+            title_line = f"{name} ({release_year})" if release_year else name
+            series_msg = format_caption(title_line, overview)
             
             if poster_url:
                 await client.send_file(chat_id, poster_url, caption=series_msg)
@@ -200,8 +297,8 @@ async def file_upload_callback_handler(event):
             series_id = tmdb_series.get('id')
             
             # Sort seasons
-            for season_num in sorted(series_data['seasons'].keys()):
-                season_files = sorted(series_data['seasons'][season_num])
+            for season_num in sorted(sdata['seasons'].keys()):
+                season_files = sorted(sdata['seasons'][season_num])
                 season_data = get_tmdb_tv_season(series_id, season_num)
                 season_poster = f"https://image.tmdb.org/t/p/w500{season_data.get('poster_path')}" if season_data and season_data.get('poster_path') else None
                 
@@ -209,7 +306,7 @@ async def file_upload_callback_handler(event):
                 
                 is_es = LANGUAGE_VIDEO_INFO.upper() == "ES"
                 season_text = f"Temporada {season_num}\n{len(season_files)} episodios" if is_es else f"Season {season_num}\n{len(season_files)} episodes"
-                season_msg = f"{season_text}\n\n{vid_info}"
+                season_msg = format_caption(season_text, "", vid_info)
                 
                 if season_poster:
                     await client.send_file(chat_id, season_poster, caption=season_msg)
@@ -220,9 +317,16 @@ async def file_upload_callback_handler(event):
                     await send_file_with_split(file_path, folder_path, delete_after_sending, message, folder_name)
 
     else: # None / Default
+        num_files = len(files)
+        print(f"User {event.chat_id} is uploading{delete_message} {num_files} files from {folder_name}")
+        message = await client.send_message(event.chat_id, f"Sending{delete_message} {num_files} files from {folder_name}")
+        progress_upload_message = await client.send_message(event.chat_id, "Loading files...")
+        
         for file_path in sorted(files):
             if SEND_VIDEO_INFO.upper() == "TRUE":
-                await client.send_message(chat_id, f"{file_path}\n{get_video_info(file_path)}")
+                vid_info = get_video_info(file_path)
+                msg = format_caption(file_path, "", vid_info)
+                await client.send_message(chat_id, msg)
             await send_file_with_split(file_path, folder_path, delete_after_sending, message, folder_name)
 
     if delete_after_sending and not failed_media:
